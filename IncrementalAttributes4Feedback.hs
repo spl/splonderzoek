@@ -30,11 +30,11 @@ bin alg i x lt rt = update i (Bin x lt rt undefined undefined)
       case t of
         Tip _ _ ->
           tip alg j
-        Bin y ltIN rtIN _ _ ->
-          let (liIN, riIN, s) = fbin alg y j (sresult ltOUT) (sresult rtOUT)
-              ltOUT = update liIN ltIN
-              rtOUT = update riIN rtIN
-          in  Bin y ltOUT rtOUT j s
+        Bin y ylt yrt _ _ ->
+          let (li, ri, s) = fbin alg y j (sresult zlt) (sresult zrt)
+              zlt = update li ylt
+              zrt = update ri yrt
+          in  Bin y zlt zrt j s
 
 empty :: (Ord a) => Alg a i s -> i -> Tree a i s
 empty = tip
@@ -56,23 +56,26 @@ insert alg x t =
 fromList :: (Ord a) => Alg a i s -> i -> [a] -> Tree a i s
 fromList alg i = foldr (insert alg) (empty alg i)
 
-newtype CounterI = CI { cntIn :: Int } deriving Show
-data CounterS = CS { sumC :: Int, cntOut :: Int } deriving Show
+newtype CounterI = CI { cntI :: Int } deriving Show
+data CounterS = CS { size :: Int, cntS :: Int } deriving Show
 
 counterAlg :: Alg a CounterI CounterS
 counterAlg = Alg ft fb
   where
+
     ft :: CounterI -> CounterS
-    ft i = CS { sumC = 1, cntOut = cntIn i }
+    ft i = CS { size = 1, cntS = cntI i }
+
     fb :: a -> CounterI -> CounterS -> CounterS -> (CounterI, CounterI, CounterS)
-    fb _ i sl sr =
-      ( i
-      , CI { cntIn = cntIn i + sumC sl + 1 }
-      , CS { sumC = sumC sl + sumC sr + 1
-           , cntOut = cntIn i + sumC sl }
+    fb _ i ls rs =
+      ( i                                   -- left child
+      , CI { cntI = 1 + cntI i + size ls }  -- right child
+      , CS { size = 1 + size ls + size rs
+           , cntS = cntI i + size ls
+           }
       )
 
-t1 = fromList counterAlg (CI { cntIn = 0 }) "azbycx"
+t1 = fromList counterAlg (CI { cntI = 0 }) "azbycx"
 
 newtype DiffI = DI { avg :: Float } deriving Show
 data DiffS = DS { sumD :: Float, len :: Float, res :: Float } deriving Show
@@ -80,19 +83,26 @@ data DiffS = DS { sumD :: Float, len :: Float, res :: Float } deriving Show
 diffAlg :: Alg Float DiffI DiffS
 diffAlg = Alg ft fb
   where
+
     ft :: DiffI -> DiffS
-    ft i = DS { sumD = 0, len = 0, res = 0 }
+    ft i =
+      DS { sumD = 0
+         , len = 0
+         , res = 0
+         }
+
     fb :: Float -> DiffI -> DiffS -> DiffS -> (DiffI, DiffI, DiffS)
-    fb x i sl sr =
+    fb x i ls sr =
       ( i
       , i
-      , DS { sumD = x + sumD sl + sumD sr
-           , len = 1 + len sl + len sr
-           , res = x - avg i }
+      , DS { sumD = x + sumD ls + sumD sr
+           , len = 1 + len ls + len sr
+           , res = x - avg i
+           }
       )
 
 t2 = let val = fromList diffAlg (DI { avg = a }) [1,4,1.5,3.5,2,3,2.5]
          s = sresult val
          a = sumD s / len s
-     in val
+     in  val
 
