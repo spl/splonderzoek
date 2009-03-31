@@ -1,6 +1,7 @@
 {-
-This is the third source file for the splonderzoek blog entry dated 2008-03-30:
+This is the third source file for the splonderzoek blog entry dated 2008-03-31:
 
+http://splonderzoek.blogspot.com/2009/03/incremental-attributes.html
 -}
 
 module IncrementalAttributes3SynthesizedAndInherited where
