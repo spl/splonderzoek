@@ -142,7 +142,7 @@ I use the datatype <code>Alg</code> here to contain the <a href="http://www.alph
 <pre>
 
 > filter :: (a -> Bool) -> Tree a -> [a]
-> filter f = fold (Alg [] (\x lr rr -> if f x then [x] else [] ++ lr ++ rr))
+> filter f = fold (Alg [] (\x lr rr -> (if f x then [x] else []) ++ lr ++ rr))
 
 > ord :: Tree Char -> Tree Int
 > ord  = fold (Alg Tip (\x lt rt -> Bin (Char.ord x) lt rt))
