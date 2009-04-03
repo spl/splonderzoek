@@ -3,7 +3,8 @@
 {-# LANGUAGE FlexibleContexts                   #-}
 {-# LANGUAGE ScopedTypeVariables                #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving         #-}
-{-# OPTIONS_GHC -Wall                           #-}
+{-# LANGUAGE RankNTypes                         #-}
+{-# OPTIONS_GHC -Wall -fno-warn-orphans         #-}
 
 module IncrementalCategorical where
 
@@ -31,11 +32,17 @@ result = tag . out
 -- Algebra and Coalgebra classes
 --------------------------------------------------------------------------------
 
+-- F-Algebra for a given functor F
 class (Functor f) => Algebra f m where
   alg :: f m -> m
 
+-- F-Coalgebra for a given functor F
 class (Functor f) => Coalgebra f m where
   coalg :: m -> f m
+
+-- F-W-Comonadic Algebras for a given functor F and comonad W
+class (Functor f) => GAlgebra f w a where
+  galg :: f (w a) -> a
 
 --------------------------------------------------------------------------------
 -- Types for specific algebras
@@ -49,27 +56,32 @@ newtype Sum = Sum { getSum :: Int } deriving (Eq, Ord, Show, Read, Num)
 -- Isomorphism between EMu and the unextended functor
 --------------------------------------------------------------------------------
 
-forget :: EMu z f -> f (EMu z f)
-forget = fun . out
+-- Was: remember
+ein' :: (Functor f) => (f z -> z) -> f (EMu z f) -> EMu z f
+ein' phiz x = emu (phiz (fmap result x)) x
 
-remember :: (Algebra f z) => f (EMu z f) -> EMu z f
-remember x = emu (alg (fmap result x)) x
+ein :: (Algebra f z) => f (EMu z f) -> EMu z f
+ein = ein' alg
 
-forget_remember_id :: (Algebra f z) => f (EMu z f) -> f (EMu z f)
-forget_remember_id = forget . remember
+-- Was: forget
+eout :: EMu z f -> f (EMu z f)
+eout = fun . out
 
-remember_forget_id :: (Algebra f z) => EMu z f -> EMu z f
-remember_forget_id = remember . forget
+ein_eout_id :: (Algebra f z) => EMu z f -> EMu z f
+ein_eout_id = ein . eout
+
+eout_ein_id :: (Algebra f z) => f (EMu z f) -> f (EMu z f)
+eout_ein_id = eout . ein
 
 --------------------------------------------------------------------------------
 -- Isomorphism between Mu and EMu
 --------------------------------------------------------------------------------
 
 extend :: (Algebra f z) => Mu f -> EMu z f
-extend = remember . fmap extend . out
+extend = ein . fmap extend . out
 
 contract :: (Functor f) => EMu z f -> Mu f
-contract = In . fmap contract . forget
+contract = In . fmap contract . eout
 
 extend_contract_id :: (Algebra f z) => EMu z f -> EMu z f
 extend_contract_id = extend . contract
@@ -81,11 +93,65 @@ contract_extend_id = contract . (extend :: Mu f -> EMu z f)
 -- Typical morphisms
 --------------------------------------------------------------------------------
 
+-- Catamorphism
+
+cata' :: (Functor f) => (f a -> a) -> EMu z f -> a
+cata' phi = phi . fmap (cata' phi) . eout
+
 cata :: (Algebra f a) => EMu z f -> a
-cata = alg . fmap cata . forget
+cata = cata' alg
+
+-- Anamorphism
+
+ana' :: (Functor f) => (f z -> z) -> (a -> f a) -> a -> EMu z f
+ana' phiz psi = ein' phiz . fmap (ana' phiz psi) . psi
 
 ana :: (Algebra f z, Coalgebra f a) => a -> EMu z f
-ana = remember . fmap ana . coalg
+ana = ana' alg coalg
+
+-- Hylomorphism
+
+-- A more general version
+hylo_g' :: (Functor f) => (a -> f a) -> (g b -> b) -> (forall c. f c -> g c) -> a -> b
+hylo_g' psi phi e = phi . e . fmap (hylo_g' psi phi e) . psi
+
+hylo' :: (Functor f) => (f b -> b) -> (a -> f a) -> a -> b
+hylo' phi psi = phi . fmap (hylo' phi psi) . psi
+
+hylo :: forall f a b. (Algebra f b, Coalgebra f a) => a -> b
+hylo = hylo' alg (coalg :: a -> f a)
+
+-- Paramorphism
+
+type Para z f = (,) (EMu z f)
+
+newtype Wrap z f a = Wrap { unWrap :: f (Para z f a) }
+
+instance (Functor f) => Functor (Wrap z f) where
+  fmap f = Wrap . fmap (fmap f) . unWrap
+
+instance Functor ((,) a) where
+  fmap f x = (fst x, f (snd x))
+
+para' :: (Functor f) => (f (Para z f a) -> a) -> EMu z f -> a
+para' phi = hylo' (phi . unWrap) (Wrap . fmap pair . eout)
+  where
+    pair x = (x, x)
+
+para :: (GAlgebra f (Para z f) a) => EMu z f -> a
+para = para' galg
+
+-- Zygomorphism
+
+type Zygo = (,)
+
+zygo' :: (Functor f) => (f a -> a) -> (f (Zygo a b) -> b) -> EMu z f -> b
+zygo' chi phi = phi . fmap (fork (zygo' chi phi) (cata' chi)) . eout
+  where
+    fork f g x = (g x, f x)
+
+zygo :: forall z f a b. (Algebra f a, GAlgebra f (Zygo a) b) => EMu z f -> b
+zygo = zygo' (alg :: f a -> a) galg
 
 --------------------------------------------------------------------------------
 -- Tree
@@ -118,10 +184,10 @@ instance Algebra (TreeF Int) Sum where
 -- Smart constructors
 
 bin :: (Algebra (TreeF a) z) => a -> ETree z a -> ETree z a -> ETree z a
-bin a x y = remember (Bin a x y)
+bin a x y = ein (Bin a x y)
 
 tip :: (Algebra (TreeF a) z) => ETree z a
-tip = remember Tip
+tip = ein Tip
 
 -- "Library" functions
 
@@ -181,10 +247,10 @@ instance Algebra (ListF Int) Sum where
 -- Smart constructors
 
 cons :: (Algebra (ListF a) z) => a -> EList z a -> EList z a
-cons a as = remember (Cons a as)
+cons a as = ein (Cons a as)
 
 nil :: (Algebra (ListF a) z) => EList z a
-nil = remember Nil
+nil = ein Nil
 
 -- "Library" functions
 
