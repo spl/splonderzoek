@@ -4,16 +4,39 @@
 {-# LANGUAGE ScopedTypeVariables                #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving         #-}
 {-# LANGUAGE RankNTypes                         #-}
-{-# OPTIONS_GHC -Wall -fno-warn-orphans         #-}
+{-# LANGUAGE UndecidableInstances               #-}
+{-# OPTIONS_GHC -Wall                           #-}
 
 module IncrementalCategorical where
 
+import Prelude hiding (succ)
+import Text.Show
+import Text.Read
+
 --------------------------------------------------------------------------------
--- "Normal" fixed point and "Extended" fixed point
+-- "Normal" fixed point
 --------------------------------------------------------------------------------
 
--- Normal fixed point
 newtype Mu f = In { out :: f (Mu f) }
+
+instance (Eq (f (Mu f))) => Eq (Mu f) where
+  In f == In g = f == g
+
+instance (Ord (f (Mu f))) => Ord (Mu f) where
+  In f `compare` In g = f `compare` g
+
+instance (Show (f (Mu f))) => Show (Mu f) where
+  showsPrec d (In f) = showParen (d > 10) $ showString "In " . showsPrec 11 f
+
+instance (Read (f (Mu f))) => Read (Mu f) where
+  readPrec = parens . prec 10 $ do
+    Ident "In " <- lexP
+    f <- step readPrec
+    return (In f)
+
+--------------------------------------------------------------------------------
+-- "Extended" fixed point
+--------------------------------------------------------------------------------
 
 -- Extend: a pair of a tag for the result and a functor
 data Ext z f r = Ext { tag :: z, fun :: f r } deriving (Eq, Ord, Show, Read)
@@ -33,12 +56,12 @@ result = tag . out
 --------------------------------------------------------------------------------
 
 -- F-Algebra for a given functor F
-class (Functor f) => Algebra f m where
-  alg :: f m -> m
+class (Functor f) => Algebra f a where
+  alg :: f a -> a
 
 -- F-Coalgebra for a given functor F
-class (Functor f) => Coalgebra f m where
-  coalg :: m -> f m
+class (Functor f) => Coalgebra f a where
+  coalg :: a -> f a
 
 -- F-W-Comonadic Algebras for a given functor F and comonad W
 class (Functor f) => GAlgebra f w a where
@@ -47,6 +70,8 @@ class (Functor f) => GAlgebra f w a where
 --------------------------------------------------------------------------------
 -- Types for specific algebras
 --------------------------------------------------------------------------------
+
+data None = None deriving (Eq, Ord, Show, Read)
 
 newtype Size = Size { getSize :: Int } deriving (Eq, Ord, Show, Read, Num)
 
@@ -123,20 +148,22 @@ hylo = hylo' alg (coalg :: a -> f a)
 
 -- Paramorphism
 
-type Para z f = (,) (EMu z f)
+-- This is simply a pair with record syntax to document the fields. 'inp' is
+-- the original input value. 'rec' is the result of a recursive call.
+data Para z f a = Para { inp :: EMu z f, rec :: a }
+
+instance Functor (Para z f) where
+  fmap f (Para v a) = Para v (f a)
 
 newtype Wrap z f a = Wrap { unWrap :: f (Para z f a) }
 
 instance (Functor f) => Functor (Wrap z f) where
   fmap f = Wrap . fmap (fmap f) . unWrap
 
-instance Functor ((,) a) where
-  fmap f x = (fst x, f (snd x))
-
 para' :: (Functor f) => (f (Para z f a) -> a) -> EMu z f -> a
 para' phi = hylo' (phi . unWrap) (Wrap . fmap pair . eout)
   where
-    pair x = (x, x)
+    pair x = Para x x
 
 para :: (GAlgebra f (Para z f) a) => EMu z f -> a
 para = para' galg
@@ -154,6 +181,76 @@ zygo :: forall z f a b. (Algebra f a, GAlgebra f (Zygo a) b) => EMu z f -> b
 zygo = zygo' (alg :: f a -> a) galg
 
 --------------------------------------------------------------------------------
+-- Nat
+--------------------------------------------------------------------------------
+
+-- Tree functor
+
+data NatF r = Z | S r deriving (Eq, Ord, Show, Read)
+
+instance Functor NatF where
+  fmap f n =
+    case n of
+      Z   -> Z
+      S m -> S (f m)
+
+-- "Normal" and "Extended" Nat types
+
+type  Nat   =  Mu   NatF
+type ENat z = EMu z NatF
+
+-- Smart constructors
+
+zero :: (Algebra NatF z) => ENat z
+zero = ein Z
+
+succ :: (Algebra NatF z) => ENat z -> ENat z
+succ n = ein (S n)
+
+-- "Library" functions
+
+add :: (Algebra NatF z) => ENat z -> ENat z -> ENat z
+add m = cata' phi
+  where
+    phi Z     = m
+    phi (S n) = succ n
+
+mul :: (Algebra NatF z) => ENat z -> ENat z -> ENat z
+mul m = cata' phi
+  where
+    phi Z     = zero
+    phi (S n) = add m n
+
+fac :: (Algebra NatF z) => ENat z -> ENat z
+fac = para' phi
+  where
+    phi Z     = succ zero
+    phi (S p) = mul (succ (inp p)) (rec p)
+
+instance Algebra NatF None where
+  alg = const None
+
+toNat :: (Num a, Algebra NatF z) => a -> ENat z
+toNat 0 = zero
+toNat x
+  | signum x == -1 = undefined
+  | otherwise      = succ (toNat (x - 1))
+
+fromNat :: ENat z -> Integer
+fromNat = cata' phi
+  where
+    phi Z     = 0
+    phi (S n) = 1 + n
+
+-- Examples
+
+testNat1 :: ENat None
+testNat1 = toNat (4 :: Int)
+
+testNat2 :: ENat None
+testNat2 = fac testNat1
+
+--------------------------------------------------------------------------------
 -- Tree
 --------------------------------------------------------------------------------
 
@@ -162,16 +259,20 @@ zygo = zygo' (alg :: f a -> a) galg
 data TreeF a r = Bin a r r | Tip deriving (Eq, Ord, Show, Read)
 
 instance Functor (TreeF a) where
-  fmap f (Bin a x y) = Bin a (f x) (f y)
-  fmap _ Tip         = Tip
+  fmap f t =
+    case t of
+      Bin a x y -> Bin a (f x) (f y)
+      Tip       -> Tip
 
 -- "Normal" and "Extended" Tree types
 
 type  Tree   a =  Mu   (TreeF a)
-
 type ETree z a = EMu z (TreeF a)
 
 -- Algebras
+
+instance Algebra (TreeF a) None where
+  alg = const None
 
 instance Algebra (TreeF a) Size where
   alg (Bin _ x y) = 1 + x + y
@@ -191,16 +292,29 @@ tip = ein Tip
 
 -- "Library" functions
 
-insert :: (Ord a, Algebra (TreeF a) z) => a -> ETree z a -> ETree z a
-insert a t =
+-- Insert with direct recursion
+insert_rec :: (Ord a, Algebra (TreeF a) z) => a -> ETree z a -> ETree z a
+insert_rec a t =
   case fun (out t) of
     Tip ->
       bin a tip tip
     Bin b x y ->
       case compare a b of
-        LT -> bin b (insert a x) y
-        GT -> bin b x (insert a y)
+        LT -> bin b (insert_rec a x) y
+        GT -> bin b x (insert_rec a y)
         EQ -> bin a x y
+
+-- Insert as a paramorphism
+insert :: (Ord a, Algebra (TreeF a) z) => a -> ETree z a -> ETree z a
+insert a = para' phi
+  where
+    phi Tip =
+      bin a tip tip
+    phi (Bin b x y) =
+      case compare a b of
+        LT -> bin b (rec x) (inp y)
+        GT -> bin b (inp x) (rec y)
+        EQ -> bin a (inp x) (inp y)
 
 toTree :: (Ord a, Algebra (TreeF a) z) => [a] -> ETree z a
 toTree = foldr insert tip
@@ -209,6 +323,9 @@ toTree = foldr insert tip
 
 testTree :: (Algebra (TreeF Int) z) => ETree z Int
 testTree = toTree [1,9,2,8,3,7]
+
+testTreeNone :: ETree None Int
+testTreeNone = testTree
 
 testTreeSize :: Int
 testTreeSize = getSize $ result $ testTree
@@ -225,13 +342,14 @@ testTreeSum = getSum $ result $ testTree
 data ListF a r = Cons a r | Nil  deriving (Eq, Ord, Show, Read)
 
 instance Functor (ListF a) where
-  fmap f (Cons a as) = Cons a (f as)
-  fmap _ Nil         = Nil
+  fmap f l =
+    case l of
+      Cons a as -> Cons a (f as)
+      Nil       -> Nil
 
 -- "Normal" and "Extended" List types
 
 type  List   a =  Mu   (ListF a)
-
 type EList z a = EMu z (ListF a)
 
 -- Algebras
