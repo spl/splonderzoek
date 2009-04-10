@@ -10,37 +10,23 @@
 module IncrementalCategorical2 where
 
 import Prelude hiding (succ)
+import Data.Maybe (fromMaybe)
+
+import IncrementalCategorical (Mu(..), None(..), Size(..), Sum(..))
+
 import Text.Show
 import Text.Read
-
---------------------------------------------------------------------------------
--- "Normal" fixed point
---------------------------------------------------------------------------------
-
-newtype Mu f = In { out :: f (Mu f) }
-
-instance (Eq (f (Mu f))) => Eq (Mu f) where
-  In f == In g = f == g
-
-instance (Ord (f (Mu f))) => Ord (Mu f) where
-  In f `compare` In g = f `compare` g
-
-instance (Show (f (Mu f))) => Show (Mu f) where
-  showsPrec d (In f) = showParen (d > 10) $ showString "In " . showsPrec 11 f
-
-instance (Read (f (Mu f))) => Read (Mu f) where
-  readPrec = parens . prec 10 $ do
-    Ident "In " <- lexP
-    f <- step readPrec
-    return (In f)
 
 --------------------------------------------------------------------------------
 -- "Attributed" fixed point
 --------------------------------------------------------------------------------
 
 -- Attribute: a triple of an inherited tag, a synthesized tag, and a functor.
-data Att i s f r = Att { itag :: i, stag :: s, fun :: f r }
-                   deriving (Eq, Ord, Show, Read)
+data Att i s f r =
+  Att { itag :: i  -- TODO: This is not actually needed here.
+      , stag :: s
+      , fun :: f r }
+  deriving (Eq, Ord, Show, Read)
 
 -- Attributed fixed point: every recursive point is now a triple with the two
 -- attributes and the original recursive point.
@@ -62,31 +48,29 @@ sresult = snd . result
 -- Algebra and Coalgebra classes
 --------------------------------------------------------------------------------
 
--- Attribute algebra
-class (Functor f) => AAlgebra f i s where
-  asyn :: i -> f (AMu i s f) -> (s, f (AMu i s f))
-
---------------------------------------------------------------------------------
--- Types for specific algebras
---------------------------------------------------------------------------------
-
-data None = None deriving (Eq, Ord, Show, Read)
-
-newtype Size = Size { getSize :: Int } deriving (Eq, Ord, Show, Read, Num)
-
-newtype Sum = Sum { getSum :: Int } deriving (Eq, Ord, Show, Read, Num)
+class (Functor f, ZipWithR f) => AAlgebra f i s where
+  aalg :: i -> f s -> (s, Maybe (f i))
 
 --------------------------------------------------------------------------------
 -- Isomorphism between AMu and the unattributed functor
 --------------------------------------------------------------------------------
 
-ain' :: (Functor f) => (i -> f (AMu i s f) -> (s, f (AMu i s f))) -> i -> f (AMu i s f) -> AMu i s f
-ain' sho i x = In (Att i s y)
-  where
-    (s, y) = sho i x
+class ZipWithR f where
+  zipWithR :: (a -> b -> c) -> f a -> f b -> Maybe (f c)
 
-ain :: forall f i s. (AAlgebra f i s) => i -> f (AMu i s f) -> AMu i s f
-ain = ain' asyn
+ain' :: (Functor f, ZipWithR f) => (i -> f s -> (s, Maybe (f i))) -> i -> f (AMu i s f) -> AMu i s f
+ain' rho i x = In (Att i s y)
+  where
+    fs = fmap sresult x
+    (s, fi) = rho i fs
+    -- push :: i -> AMu i s f -> AMu i s f
+    push j = ain' rho j . fun . out
+    y = case fi of
+          Nothing -> x
+          Just fj -> fromMaybe x (zipWithR push fj x)
+
+ain :: (AAlgebra f i s) => i -> f (AMu i s f) -> AMu i s f
+ain = ain' aalg
 
 -- Was: forget
 aout :: AMu i s f -> (f (AMu i s f), i)
@@ -152,6 +136,18 @@ instance Functor NatF where
       Z   -> Z
       S m -> S (f m)
 
+instance ZipWithR NatF where
+  zipWithR f nl nr =
+    case nl of
+      Z ->
+        case nr of
+          Z -> Just Z
+          _ -> Nothing
+      S ml ->
+        case nr of
+          S mr -> Just (S (f ml mr))
+          _    -> Nothing
+
 -- "Normal" and "Attributed" Nat types
 
 type  Nat     =  Mu     NatF
@@ -200,7 +196,7 @@ fromNat = cata' phi
 -- Examples
 
 instance AAlgebra NatF None None where
-  asyn _ x = (None, x)
+  aalg _ _ = (None, Nothing)
 
 testNat1 :: ANat None None
 testNat1 = toNat None (4 :: Int)
@@ -209,10 +205,11 @@ testNat2 :: ANat None None
 testNat2 = fac testNat1
 
 instance AAlgebra NatF Size Size where
-  asyn i x =
-    case x of
-      Z   -> (i, Z)
-      S n -> (1 + sresult n, S n)
+  aalg i x = (s, Nothing)
+    where
+      s = case x of
+            Z   -> i
+            S m -> 1 + m
 
 testNat3 :: ANat Size Size
 testNat3 = toNat (Size 7) (4 :: Int)
@@ -230,6 +227,18 @@ instance Functor (TreeF a) where
     case t of
       Bin a x y -> Bin a (f x) (f y)
       Tip       -> Tip
+
+instance ZipWithR (TreeF a) where
+  zipWithR f ta tb =
+    case ta of
+      Tip ->
+        case tb of
+          Tip -> Just Tip
+          _   -> Nothing
+      Bin _ lx ly ->
+        case tb of
+          Bin b rx ry -> Just (Bin b (f lx rx) (f ly ry))
+          _           -> Nothing
 
 -- "Normal" and "Extended" Tree types
 
@@ -281,7 +290,7 @@ testTree i = toTree i [1,9,2,8,3,7]
 -- No algebra
 
 instance AAlgebra (TreeF a) None None where
-  asyn _ x = (None, x)
+  aalg _ _ = (None, Nothing)
 
 testTreeNone :: ATree None None Int
 testTreeNone = testTree None
@@ -289,14 +298,11 @@ testTreeNone = testTree None
 -- Size algebra
 
 instance AAlgebra (TreeF a) Size Size where
-  asyn (Size i) t =
-    case t of
-      Tip ->
-        (Size i, Tip)
-      Bin a x y ->
-        (Size (1 + sz x + sz y), Bin a x y)
-        where
-          sz = getSize . sresult
+  aalg i t = (s, Nothing)
+    where
+      s = case t of
+            Tip       -> i
+            Bin _ x y -> 1 + x + y
 
 testTreeSize :: Int
 testTreeSize = getSize $ sresult (testTree 1 :: ATree Size Size Int)
@@ -304,15 +310,46 @@ testTreeSize = getSize $ sresult (testTree 1 :: ATree Size Size Int)
 -- Sum algebra
 
 instance AAlgebra (TreeF Int) None Sum where
-  asyn _ t =
-    case t of
-      Tip ->
-        (0, Tip)
-      Bin a x y ->
-        (Sum a + sresult x + sresult y, Bin a x y)
+  aalg _ t = (s, Nothing)
+    where
+      s = case t of
+            Tip       -> 0
+            Bin a x y -> Sum a + x + y
 
 testTreeSum :: Int
 testTreeSum = getSum $ sresult $ testTree None
+
+-- Tag with depth algebra
+
+newtype TagDepth = TD { getDepth :: Int } deriving (Eq, Ord, Show, Read, Num)
+
+instance AAlgebra (TreeF a) TagDepth None where
+  aalg i fs = (None, Just fi)
+    where
+      fi = fmap (const (1 + i)) fs
+
+testTreeTagDepth :: ATree TagDepth None Int
+testTreeTagDepth = testTree 0
+
+-- Counter algebra
+
+newtype CounterI = CI { cntI :: Int } deriving (Eq, Ord, Show, Read, Num)
+data CounterS = CS { size :: Int, cntS :: Int } deriving (Eq, Ord, Show, Read)
+
+instance AAlgebra (TreeF a) CounterI CounterS where
+  aalg i t =
+    case t of
+      Tip       ->
+        (CS { size = 1, cntS = cntI i }, Just Tip)
+      Bin a sx sy ->
+        let sizex = size sx
+            sizey = size sy in
+        ( CS { size = sizex + 1 + sizey, cntS = cntI i + sizex }
+        , Just (Bin a i (i + fromIntegral sizex + 1))
+        )
+
+testTreeCounter :: ATree CounterI CounterS Int
+testTreeCounter = testTree 0
 
 -- Float difference algebra
 
@@ -320,25 +357,26 @@ newtype DiffI = DI { avg :: Float } deriving (Eq, Ord, Show, Read)
 data DiffS = DS { sumD :: Float, len :: Float, res :: Float } deriving (Eq, Ord, Show, Read)
 
 instance AAlgebra (TreeF Float) DiffI DiffS where
-  asyn i t =
-    case t of
-      Tip ->
-        (DS { sumD = 0, len = 0, res = 0 }, Tip)
-      Bin n x y ->
-        (DS { sumD = n + sumD sx + sumD sy, len = 1 + len sx + len sy, res = n - avg i }, Bin n x y)
-        where
-          sx = sresult x
-          sy = sresult y
+  aalg i t = (s, Nothing)
+    where
+      s = case t of
+            Tip ->
+              DS { sumD = 0, len = 0, res = 0 }
+            Bin n sx sy ->
+              DS { sumD = n + sumD sx + sumD sy, len = 1 + len sx + len sy, res = n - avg i }
 
 average :: (Fractional a) => [a] -> a
 average x = sum x / (fromIntegral (length x))
 
-testTreeDiff :: (AAlgebra (TreeF Float) DiffI DiffS) => ATree DiffI DiffS Float
-testTreeDiff = val
+toTreeDiff :: [Float] -> ATree DiffI DiffS Float
+toTreeDiff xs = val
   where
-    val = toTree i [1,9,2,8,3,7]
+    val = toTree i xs
     s = sresult val
     i = DI { avg = sumD s / len s }
+
+testTreeDiff :: ATree DiffI DiffS Float
+testTreeDiff = toTreeDiff [1,9,2,8,3,7]
 
 --------------------------------------------------------------------------------
 -- List
@@ -353,6 +391,18 @@ instance Functor (ListF a) where
     case l of
       Cons a as -> Cons a (f as)
       Nil       -> Nil
+
+instance ZipWithR (ListF a) where
+  zipWithR f ll lr =
+    case ll of
+      Nil ->
+        case lr of
+          Nil -> Just Nil
+          _   -> Nothing
+      Cons _ asl ->
+        case lr of
+          Cons a asr -> Just (Cons a (f asl asr))
+          _          -> Nothing
 
 -- "Normal" and "Extended" List types
 
@@ -378,21 +428,21 @@ testList :: (AAlgebra (ListF Int) i s) => i -> AList i s Int
 testList i = toList i [1,9,2,8,3,7]
 
 instance AAlgebra (ListF a) Size Size where
-  asyn i l =
-    case l of
-      Nil       -> (i, Nil)
-      Cons a as -> (1 + sresult as, Cons a as)
+  aalg i l = (s, Nothing)
+    where
+      s = case l of
+            Nil       -> i
+            Cons _ as -> 1 + as
 
 testListSize :: Int
 testListSize = getSize $ sresult (testList 1 :: AList Size Size Int)
 
 instance AAlgebra (ListF Int) None Sum where
-  asyn _ l =
-    case l of
-      Nil ->
-        (0, Nil)
-      Cons a as ->
-        (Sum a + sresult as, Cons a as)
+  aalg _ l = (s, Nothing)
+    where
+      s = case l of
+            Nil       -> 0
+            Cons a as -> Sum a + as
 
 testListSum :: Int
 testListSum = getSum $ sresult (testList None :: AList None Sum Int)
