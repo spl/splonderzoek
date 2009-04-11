@@ -23,7 +23,7 @@ import Text.Read
 
 -- Attribute: a triple of an inherited tag, a synthesized tag, and a functor.
 data Att i s f r =
-  Att { itag :: i  -- TODO: This is not actually needed here.
+  Att { itag :: i
       , stag :: s
       , fun :: f r }
   deriving (Eq, Ord, Show, Read)
@@ -87,7 +87,8 @@ cata' phi x = let (f, i) = aout x in phi (fmap (cata' phi) f) i
 
 -- Anamorphism
 
--- TODO
+ana' :: (Functor f, ZipWithR f) => (i -> f s -> (s, Maybe (f i))) -> (a -> f a) -> i -> a -> AMu i s f
+ana' rho psi i = ain' rho i . fmap (ana' rho psi i) . psi
 
 -- Hylomorphism
 
@@ -115,12 +116,15 @@ instance (Functor f) => Functor (Wrap i s f) where
 para' :: (Functor f) => (f (Para i s f a) -> i -> a) -> AMu i s f -> a
 para' phi = hylo' (uncurry phi . fork unWrap unInh) psi
   where
-    psi x = let (f, i) = aout x in Wrap (fmap pair f) i
+    psi = uncurry (Wrap . fmap pair) . aout
     pair x = Para x x
 
 -- Zygomorphism
 
--- TODO
+type Zygo a b = (b, a)
+
+zygo' :: (Functor f) => (f a -> i -> a) -> (f (Zygo a b) -> b) -> AMu i s f -> b
+zygo' chi phi = phi . fmap (fork (zygo' chi phi) (cata' chi)) . fst . aout
 
 --------------------------------------------------------------------------------
 -- Nat
@@ -279,6 +283,18 @@ insert a = para' phi
         GT -> bin i b (inp x) (rec y)
         EQ -> bin i a (inp x) (inp y)
 
+zipWithTree :: (AAlgebra (TreeF c) i s) => (a -> b -> c) -> i -> ATree i s a -> ATree i s b -> ATree i s c
+zipWithTree f i = curry (ana' aalg psi i)
+  where
+    psi (In (Att _ _ Tip), In (Att _ _ Tip))                         = Tip
+    psi (In (Att _ _ (Bin a asl asr)), In (Att _ _ (Bin b bsl bsr))) = Bin (f a b) (asl, bsl) (asr, bsr)
+    psi _                                                            = undefined
+
+iterateTree :: (AAlgebra (TreeF a) i s) => (a -> a) -> i -> a -> ATree i s a
+iterateTree f = ana' aalg psi
+  where
+    psi x = Bin x (f x) (f x)
+
 toTree :: (Ord a, AAlgebra (TreeF a) i s) => i -> [a] -> ATree i s a
 toTree i = foldr insert (tip i)
 
@@ -419,6 +435,18 @@ nil i = ain i Nil
 
 -- "Library" functions
 
+zipWithList :: (AAlgebra (ListF c) i s) => (a -> b -> c) -> i -> AList i s a -> AList i s b -> AList i s c
+zipWithList f i = curry (ana' aalg psi i)
+  where
+    psi (In (Att _ _ Nil), In (Att _ _ Nil))                 = Nil
+    psi (In (Att _ _ (Cons a as)), In (Att _ _ (Cons b bs))) = Cons (f a b) (as, bs)
+    psi _                                                    = undefined
+
+iterateList :: (AAlgebra (ListF a) i s) => (a -> a) -> i -> a -> AList i s a
+iterateList f = ana' aalg psi
+  where
+    psi x = Cons x (f x)
+
 toList :: (AAlgebra (ListF a) i s) => i -> [a] -> AList i s a
 toList i = foldr (cons i) (nil i)
 
@@ -426,6 +454,12 @@ toList i = foldr (cons i) (nil i)
 
 testList :: (AAlgebra (ListF Int) i s) => i -> AList i s Int
 testList i = toList i [1,9,2,8,3,7]
+
+instance AAlgebra (ListF a) None None where
+  aalg _ _ = (None, Nothing)
+
+testListNone :: AList None None Int
+testListNone = toList None [1,9,2,8,3,7]
 
 instance AAlgebra (ListF a) Size Size where
   aalg i l = (s, Nothing)
