@@ -316,6 +316,18 @@ insert a = para' phi
         GT -> bin b (inp x) (rec y)
         EQ -> bin a (inp x) (inp y)
 
+zipWithTree :: (Algebra (TreeF c) z) => (a -> b -> c) -> ETree z a -> ETree z b -> ETree z c
+zipWithTree f = curry (ana' alg psi)
+  where
+    psi (In (Ext _ Tip), In (Ext _ Tip))                         = Tip
+    psi (In (Ext _ (Bin a asl asr)), In (Ext _ (Bin b bsl bsr))) = Bin (f a b) (asl, bsl) (asr, bsr)
+    psi _                                                        = undefined
+
+iterateTree :: (Algebra (TreeF a) z) => (a -> a) -> a -> ETree z a
+iterateTree f = ana' alg psi
+  where
+    psi x = Bin x (f x) (f x)
+
 toTree :: (Ord a, Algebra (TreeF a) z) => [a] -> ETree z a
 toTree = foldr insert tip
 
@@ -354,6 +366,9 @@ type EList z a = EMu z (ListF a)
 
 -- Algebras
 
+instance Algebra (ListF a) None where
+  alg = const None
+
 instance Algebra (ListF a) Size where
   alg (Cons _ as) = 1 + as
   alg Nil         = 0
@@ -371,6 +386,18 @@ nil :: (Algebra (ListF a) z) => EList z a
 nil = ein Nil
 
 -- "Library" functions
+
+zipWithList :: (Algebra (ListF c) z) => (a -> b -> c) -> EList z a -> EList z b -> EList z c
+zipWithList f = curry (ana' alg psi)
+  where
+    psi (In (Ext _ Nil), In (Ext _ Nil))                 = Nil
+    psi (In (Ext _ (Cons a as)), In (Ext _ (Cons b bs))) = Cons (f a b) (as, bs)
+    psi _                                                = undefined
+
+iterateList :: (Algebra (ListF a) z) => (a -> a) -> a -> EList z a
+iterateList f = ana' alg psi
+  where
+    psi x = Cons x (f x)
 
 toList :: (Algebra (ListF a) z) => [a] -> EList z a
 toList = foldr cons nil
