@@ -5,6 +5,12 @@
 {-# LANGUAGE RankNTypes                         #-}
 {-# OPTIONS_GHC -Wall                           #-}
 
+{-
+This is a source file for the splonderzoek blog entry dated 2008-04-12:
+
+http://splonderzoek.blogspot.com/2009/04/latest-on-incremental-fold-and.html
+-}
+
 module IncrementalFixAttributes where
 
 import Prelude hiding (succ, zipWith)
