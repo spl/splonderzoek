@@ -7,7 +7,7 @@
 {-# LANGUAGE UndecidableInstances               #-}
 {-# OPTIONS_GHC -Wall                           #-}
 
-module IncrementalCategorical where
+module IncrementalFixFold where
 
 import Prelude hiding (succ)
 import Text.Show

@@ -1,18 +1,16 @@
 {-# LANGUAGE MultiParamTypeClasses              #-}
 {-# LANGUAGE FlexibleInstances                  #-}
 {-# LANGUAGE FlexibleContexts                   #-}
-{-# LANGUAGE ScopedTypeVariables                #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving         #-}
 {-# LANGUAGE RankNTypes                         #-}
-{-# LANGUAGE UndecidableInstances               #-}
 {-# OPTIONS_GHC -Wall                           #-}
 
-module IncrementalCategorical2 where
+module IncrementalFixAttributes where
 
 import Prelude hiding (succ)
 import Data.Maybe (fromMaybe)
 
-import IncrementalCategorical (Mu(..), None(..), Size(..), Sum(..))
+import IncrementalFixFold (Mu(..), None(..), Size(..), Sum(..))
 
 import Text.Show
 import Text.Read
