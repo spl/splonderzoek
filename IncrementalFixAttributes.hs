@@ -7,7 +7,7 @@
 
 module IncrementalFixAttributes where
 
-import Prelude hiding (succ)
+import Prelude hiding (succ, zipWith)
 import Data.Maybe (fromMaybe)
 
 import IncrementalFixFold (Mu(..), None(..), Size(..), Sum(..))
@@ -46,17 +46,17 @@ sresult = snd . result
 -- Algebra and Coalgebra classes
 --------------------------------------------------------------------------------
 
-class (Functor f, ZipWithR f) => AAlgebra f i s where
+class (Functor f, Zippable f) => AAlgebra f i s where
   aalg :: i -> f s -> (s, Maybe (f i))
 
 --------------------------------------------------------------------------------
 -- Isomorphism between AMu and the unattributed functor
 --------------------------------------------------------------------------------
 
-class ZipWithR f where
-  zipWithR :: (a -> b -> c) -> f a -> f b -> Maybe (f c)
+class Zippable f where
+  zipWith :: (a -> b -> c) -> f a -> f b -> Maybe (f c)
 
-ain' :: (Functor f, ZipWithR f) => (i -> f s -> (s, Maybe (f i))) -> i -> f (AMu i s f) -> AMu i s f
+ain' :: (Functor f, Zippable f) => (i -> f s -> (s, Maybe (f i))) -> i -> f (AMu i s f) -> AMu i s f
 ain' rho i x = In (Att i s y)
   where
     fs = fmap sresult x
@@ -65,7 +65,7 @@ ain' rho i x = In (Att i s y)
     push j = ain' rho j . fun . out
     y = case fi of
           Nothing -> x
-          Just fj -> fromMaybe x (zipWithR push fj x)
+          Just fj -> fromMaybe x (zipWith push fj x)
 
 ain :: (AAlgebra f i s) => i -> f (AMu i s f) -> AMu i s f
 ain = ain' aalg
@@ -85,7 +85,7 @@ cata' phi x = let (f, i) = aout x in phi (fmap (cata' phi) f) i
 
 -- Anamorphism
 
-ana' :: (Functor f, ZipWithR f) => (i -> f s -> (s, Maybe (f i))) -> (a -> f a) -> i -> a -> AMu i s f
+ana' :: (Functor f, Zippable f) => (i -> f s -> (s, Maybe (f i))) -> (a -> f a) -> i -> a -> AMu i s f
 ana' rho psi i = ain' rho i . fmap (ana' rho psi i) . psi
 
 -- Hylomorphism
@@ -138,8 +138,8 @@ instance Functor NatF where
       Z   -> Z
       S m -> S (f m)
 
-instance ZipWithR NatF where
-  zipWithR f nl nr =
+instance Zippable NatF where
+  zipWith f nl nr =
     case nl of
       Z ->
         case nr of
@@ -230,8 +230,8 @@ instance Functor (TreeF a) where
       Bin a x y -> Bin a (f x) (f y)
       Tip       -> Tip
 
-instance ZipWithR (TreeF a) where
-  zipWithR f ta tb =
+instance Zippable (TreeF a) where
+  zipWith f ta tb =
     case ta of
       Tip ->
         case tb of
@@ -406,17 +406,17 @@ instance Functor (ListF a) where
       Cons a as -> Cons a (f as)
       Nil       -> Nil
 
-instance ZipWithR (ListF a) where
-  zipWithR f ll lr =
+instance Zippable (ListF a) where
+  zipWith f ll lr =
     case ll of
       Nil ->
         case lr of
           Nil -> Just Nil
           _   -> Nothing
-      Cons _ asl ->
+      Cons _ as ->
         case lr of
-          Cons a asr -> Just (Cons a (f asl asr))
-          _          -> Nothing
+          Cons b bs -> Just (Cons b (f as bs))
+          _         -> Nothing
 
 -- "Normal" and "Extended" List types
 
