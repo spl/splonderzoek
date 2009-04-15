@@ -15,6 +15,7 @@ module IncrementalFixAttributes where
 
 import Prelude hiding (succ, zipWith)
 import Data.Maybe (fromMaybe)
+import Control.Arrow ((&&&))
 
 import IncrementalFixFold (Mu(..), None(..), Size(..), Sum(..))
 
@@ -36,11 +37,8 @@ data Att i s f r =
 -- attributes and the original recursive point.
 type AMu i s f = Mu (Att i s f)
 
-fork :: (a -> b) -> (a -> c) -> a -> (b, c)
-fork f g x = (f x, g x)
-
 result :: AMu i s f -> (i, s)
-result = fork itag stag . out
+result = (itag &&& stag) . out
 
 iresult :: AMu i s f -> i
 iresult = fst . result
@@ -78,7 +76,7 @@ ain = ain' aalg
 
 -- Was: forget
 aout :: AMu i s f -> (f (AMu i s f), i)
-aout = fork fun itag . out
+aout = (fun &&& itag) . out
 
 --------------------------------------------------------------------------------
 -- Typical morphisms
@@ -118,7 +116,7 @@ instance (Functor f) => Functor (Wrap i s f) where
   fmap f x = Wrap (fmap (fmap f) (unWrap x)) (unInh x)
 
 para' :: (Functor f) => (f (Para i s f a) -> i -> a) -> AMu i s f -> a
-para' phi = hylo' (uncurry phi . fork unWrap unInh) psi
+para' phi = hylo' (uncurry phi . (unWrap &&& unInh)) psi
   where
     psi = uncurry (Wrap . fmap pair) . aout
     pair x = Para x x
@@ -128,7 +126,7 @@ para' phi = hylo' (uncurry phi . fork unWrap unInh) psi
 type Zygo a b = (b, a)
 
 zygo' :: (Functor f) => (f a -> i -> a) -> (f (Zygo a b) -> b) -> AMu i s f -> b
-zygo' chi phi = phi . fmap (fork (zygo' chi phi) (cata' chi)) . fst . aout
+zygo' chi phi = phi . fmap (zygo' chi phi &&& cata' chi) . fst . aout
 
 --------------------------------------------------------------------------------
 -- Nat
@@ -275,6 +273,8 @@ insert_rec a t =
         GT -> bin i b x (insert_rec a y)
         EQ -> bin i a x y
 
+{-
+
 -- Insert as a paramorphism
 insert :: (Ord a, AAlgebra (TreeF a) i s) => a -> ATree i s a -> ATree i s a
 insert a = para' phi
@@ -397,6 +397,8 @@ toTreeDiff xs = val
 
 testTreeDiff :: ATree DiffI DiffS Float
 testTreeDiff = toTreeDiff [1,9,2,8,3,7]
+
+-}
 
 --------------------------------------------------------------------------------
 -- List
