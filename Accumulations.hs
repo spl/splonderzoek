@@ -125,7 +125,8 @@ downwards_accum f g h = fmap (cataThread f g h) . paths
 
 downwards_pass' :: (a -> b) -> (a -> b -> b) -> (a -> b -> b) -> Tree a -> Tree b
 downwards_pass' f _ _ (Leaf a)       = Leaf (f a)
-downwards_pass' f g h (Branch x a y) = Branch (fmap (g a) (downwards_pass' f g h x)) (f a) (fmap (h a) (downwards_pass' f g h y))
+downwards_pass' f g h (Branch x a y) =
+  Branch (fmap (g a) (downwards_pass' f g h x)) (f a) (fmap (h a) (downwards_pass' f g h y))
 
 data Daerht a
   = DLeaf a -- ♢
@@ -186,7 +187,7 @@ ps f g = fmap (cataList f g) . inits
 fringe :: Tree a -> List a
 fringe = cataTree One (\u _ v -> Append u v)
 
--- The off-used 's' mentioned inline in the text on page 133
+-- The oft-used 's' mentioned inline in the text on page 133
 s f g = cataList f g . fringe
 
 tps1 :: (a -> b) -> (b -> b -> b) -> Tree a -> Tree b
